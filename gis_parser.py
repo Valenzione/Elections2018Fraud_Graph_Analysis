@@ -1,22 +1,16 @@
 import contextlib
+import multiprocessing as mp
+import sys
+
+import numpy as np
 import pandas as pd
+from fuzzywuzzy import process
+from tqdm import tqdm
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.expected_conditions import staleness_of
-from selenium.webdriver.support.ui import Select
-from selenium.webdriver.support.ui import WebDriverWait
-from tqdm import tqdm
-from fuzzywuzzy import process
-import sys
-import numpy as np
-import multiprocessing as mp
-
-
-@contextlib.contextmanager
-def wait_for_page_load(driver_, timeout=30):
-    old_page = driver_.find_element_by_tag_name('html')
-    yield
-    WebDriverWait(driver_, timeout).until(staleness_of(old_page))
+from selenium.webdriver.support.ui import Select, WebDriverWait
 
 
 def parse_response(text):
@@ -35,7 +29,7 @@ def retrieve_adress(df: pd.DataFrame, file_chunk: int):
     regions = [x.text for x in dropRegion.options][1:]
     geo_uik_data = pd.DataFrame(columns=['uik', 'region', 'address', 'phone'])
 
-    for i, (index, row) in tqdm(enumerate(df.iterrows())):
+    for i, ( _ , row) in enumerate(df.iterrows()):
         try:
             driver.get(ROOT_URL)
             input_uik = driver.find_element(By.NAME, "uik")
@@ -55,17 +49,23 @@ def retrieve_adress(df: pd.DataFrame, file_chunk: int):
                 errors += 1
         except Exception as inst:
             print(type(inst), file=sys.stderr)
+            try:
+                driver.close()
+            except Exception as inst2:
+                print(type(inst), file=sys.stderr)
+            driver = webdriver.Firefox()
+
     return geo_uik_data
 
 
 NO_DATA_WARNING = """Информируем Вас, что сведения об избирательном участке по введенным Вами данным в системе ГАС "ВЫБОРЫ" на момент создания запроса отсутствуют."""
 ROOT_URL = "http://cikrf.ru/services/lk_address/?do=find_by_uik"
 uik_data = pd.read_csv("final_table.csv", encoding='utf8')
-uik_chunks = np.array_split(uik_data, 4)
+uik_chunks = np.array_split(uik_data, 3)
 
 if __name__ == '__main__':
-    pool = mp.Pool(processes=4)
-    results = [pool.apply_async(retrieve_adress, args=(uik_chunks[x], x)) for x in range(4)]
+    pool = mp.Pool(processes=3)
+    results = [pool.apply_async(retrieve_adress, args=(uik_chunks[x], x)) for x in range(3)]
     output = [p.get() for p in results]
     output = pd.concat(output)
     output.to_csv("addresses.csv", encoding='utf8')
